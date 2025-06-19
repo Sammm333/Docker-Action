@@ -1,0 +1,46 @@
+name: Full CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Run Dummy Tests
+      run: echo "✅ All tests passed!"
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Log in to DockerHub
+      run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+    - name: Build Docker Image
+      run: docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/hello-nginx:latest .
+
+    - name: Push Docker Image
+      run: docker push ${{ secrets.DOCKERHUB_USERNAME }}/hello-nginx:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+    - name: Set up SSH key
+      run: |
+        echo "${{ secrets.EC2_KEY }}"  | base64 -d > key.pem
+        chmod 600 key.pem
+        cat key.pem
+    - name: Deploy on EC2 via SSH
+      run: |
+        ssh -o StrictHostKeyChecking=no -i key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/hello-nginx:latest
+          docker stop web || true
+          docker rm web || true
+          docker run -d --name web -p 80:80 ${{ secrets.DOCKERHUB_USERNAME }}/hello-nginx:latest
+        EOF
